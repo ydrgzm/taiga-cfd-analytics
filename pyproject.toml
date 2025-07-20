@@ -1,0 +1,125 @@
+[build-system]
+requires = ["setuptools>=45", "wheel", "setuptools-scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "taiga-cfd-analytics"
+dynamic = ["version"]
+description = "Enterprise-grade CFD analytics system for Taiga with modern TUI"
+readme = "README_PIP.md"
+license = {file = "LICENSE"}
+authors = [
+    {name = "Muhammad Zeshan Ayub", email = "zeshanayub.connect@gmail.com"}
+]
+maintainers = [
+    {name = "Muhammad Zeshan Ayub", email = "zeshanayub.connect@gmail.com"}
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology", 
+    "Intended Audience :: System Administrators",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Office/Business :: Financial :: Spreadsheet",
+    "Topic :: Scientific/Engineering :: Visualization", 
+    "Topic :: Scientific/Engineering :: Information Analysis",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10", 
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Environment :: Console",
+    "Environment :: Console :: Curses",
+    "Natural Language :: English",
+]
+keywords = [
+    "taiga", "cfd", "cumulative-flow-diagram", "analytics", "project-management",
+    "kanban", "agile", "visualization", "reporting", "enterprise", "tui", 
+    "terminal", "dashboard", "metrics", "scrum", "devops"
+]
+dependencies = [
+    "requests>=2.25.1",
+    "matplotlib>=3.5.0",
+    "seaborn>=0.11.0", 
+    "pandas>=1.3.0",
+    "numpy>=1.21.0",
+    "rich>=13.0.0",
+    "textual>=0.44.0"
+]
+requires-python = ">=3.8"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "black>=22.0.0",
+    "flake8>=4.0.0",
+    "mypy>=0.950",
+    "build>=0.8.0",
+    "twine>=4.0.0"
+]
+docs = [
+    "sphinx>=4.0.0", 
+    "sphinx-rtd-theme>=1.0.0"
+]
+
+[project.urls]
+Homepage = "https://github.com/ydrgzm/taiga-cfd-analytics"
+Documentation = "https://github.com/ydrgzm/taiga-cfd-analytics#readme"
+Repository = "https://github.com/ydrgzm/taiga-cfd-analytics.git"
+"Bug Tracker" = "https://github.com/ydrgzm/taiga-cfd-analytics/issues"
+Discussions = "https://github.com/ydrgzm/taiga-cfd-analytics/discussions"
+Changelog = "https://github.com/ydrgzm/taiga-cfd-analytics/blob/main/CHANGELOG.md"
+Funding = "https://github.com/sponsors/ydrgzm"
+
+[project.scripts]
+taiga-cfd = "taiga_cfd.cli:main"
+taiga-cfd-analytics = "taiga_cfd.cli:main"
+taiga-analytics = "taiga_cfd.cli:main"
+
+[tool.setuptools]
+packages = ["taiga_cfd"]
+
+[tool.setuptools.dynamic]
+version = {attr = "taiga_cfd.__version__"}
+
+[tool.black]
+line-length = 88
+target-version = ['py38']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.venv
+  | build
+  | dist
+)/
+'''
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = false
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
