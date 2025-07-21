@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
-Setup script for Taiga CFD Analytics System
-Professional pip package for enterprise users
+Setup script for Taiga CFD Analytics System - GitHub Ready Edition
+Professional pip package for enterprise users with modern TUI interface
+
+This setup.py is synchronized with the taiga_cfd module structure
+and is designed for GitHub distribution and PyPI publishing.
 """
 
 from setuptools import setup, find_packages
@@ -12,15 +15,27 @@ import os
 this_directory = Path(__file__).parent
 long_description = (this_directory / "README.md").read_text()
 
-# Version
-__version__ = "2.1.0"
+
+# Version - synchronized with taiga_cfd module
+# Read version from the module's __init__.py file
+def get_version():
+    version_file = this_directory / "taiga_cfd" / "__init__.py"
+    if version_file.exists():
+        with open(version_file, "r") as f:
+            for line in f:
+                if line.startswith("__version__"):
+                    return line.split("=")[1].strip().strip('"').strip("'")
+    return "2.2.1"  # Fallback
+
+
+__version__ = get_version()
 
 setup(
     name="taiga-cfd-analytics",
     version=__version__,
     author="Muhammad Zeshan Ayub",
     author_email="zeshanayub.connect@gmail.com",
-    description="Enterprise-grade Cumulative Flow Diagram (CFD) analytics system for Taiga project management with modern TUI",
+    description="Enterprise-grade Cumulative Flow Diagram (CFD) analytics system for Taiga project management with modern Terminal User Interface (TUI)",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/ydrgzm/taiga-cfd-analytics",
@@ -30,14 +45,14 @@ setup(
         "Source Code": "https://github.com/ydrgzm/taiga-cfd-analytics",
         "Funding": "https://github.com/sponsors/ydrgzm",
     },
-    packages=find_packages(),
+    packages=find_packages(include=["taiga_cfd", "taiga_cfd.*"]),
     classifiers=[
         "Development Status :: 5 - Production/Stable",
         "Intended Audience :: Developers",
         "Intended Audience :: Information Technology",
         "Intended Audience :: System Administrators",
         "Topic :: Software Development :: Libraries :: Python Modules",
-        "Topic :: Office/Business :: Financial :: Spreadsheet", 
+        "Topic :: Office/Business :: Financial :: Spreadsheet",
         "Topic :: Scientific/Engineering :: Visualization",
         "Topic :: Scientific/Engineering :: Information Analysis",
         "License :: OSI Approved :: MIT License",
@@ -58,43 +73,59 @@ setup(
     python_requires=">=3.8",
     install_requires=[
         "requests>=2.25.1",
-        "matplotlib>=3.5.0", 
+        "matplotlib>=3.5.0",
         "seaborn>=0.11.0",
         "pandas>=1.3.0",
         "numpy>=1.21.0",
         "rich>=13.0.0",
-        "textual>=0.44.0"
     ],
     extras_require={
-        'dev': [
-            'pytest>=7.0.0',
-            'black>=22.0.0',
-            'flake8>=4.0.0',
-            'mypy>=0.950',
+        "dev": [
+            "pytest>=7.0.0",
+            "black>=22.0.0",
+            "flake8>=4.0.0",
+            "mypy>=0.950",
         ],
-        'docs': [
-            'sphinx>=4.0.0',
-            'sphinx-rtd-theme>=1.0.0',
+        "docs": [
+            "sphinx>=4.0.0",
+            "sphinx-rtd-theme>=1.0.0",
         ],
     },
     entry_points={
-        'console_scripts': [
-            'taiga-cfd=taiga_cfd.cli:main',
-            'taiga-cfd-analytics=taiga_cfd.cli:main',
-            'taiga-analytics=taiga_cfd.cli:main',
+        "console_scripts": [
+            "taiga-cfd=taiga_cfd.cli:main",
+            "taiga-cfd-analytics=taiga_cfd.cli:main",
+            "taiga-analytics=taiga_cfd.cli:main",
         ],
     },
     include_package_data=True,
     package_data={
-        'taiga_cfd': ['*.md', '*.txt', '*.json'],
+        "taiga_cfd": ["*.md", "*.txt", "*.json", "*.cfg"],
+        "": ["*.md", "*.txt", "*.rst", "LICENSE"],
     },
     data_files=[
-        ('share/taiga-cfd-analytics', ['README.md', 'LICENSE']),
+        (
+            "share/taiga-cfd-analytics",
+            ["README.md", "LICENSE", "CHANGELOG.md", "CONTRIBUTING.md"],
+        ),
     ],
     keywords=[
-        'taiga', 'cfd', 'cumulative-flow-diagram', 'analytics', 'project-management',
-        'kanban', 'agile', 'visualization', 'reporting', 'enterprise', 'tui',
-        'terminal', 'dashboard', 'metrics', 'scrum', 'devops'
+        "taiga",
+        "cfd",
+        "cumulative-flow-diagram",
+        "analytics",
+        "project-management",
+        "kanban",
+        "agile",
+        "visualization",
+        "reporting",
+        "enterprise",
+        "tui",
+        "terminal",
+        "dashboard",
+        "metrics",
+        "scrum",
+        "devops",
     ],
     zip_safe=False,
 )

@@ -9,7 +9,7 @@ for managing Taiga CFD analytics with rich formatting and colors.
 Created by: Muhammad Zeshan Ayub
 GitHub: https://github.com/ydrgzm
 Email: zeshanayub.connect@gmail.com
-Version: 2.1.0
+Version: 2.2.1
 
 Usage:
     taiga-cfd
@@ -17,7 +17,7 @@ Usage:
     taiga-analytics
 """
 
-__version__ = "2.1.0"
+__version__ = "2.2.1"
 __author__ = "Muhammad Zeshan Ayub"
 __email__ = "zeshanayub.connect@gmail.com"
 __github__ = "https://github.com/ydrgzm"
