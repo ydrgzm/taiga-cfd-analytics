@@ -26,11 +26,52 @@ import os
 from datetime import datetime, timedelta
 from collections import defaultdict, Counter
 import csv
+from pathlib import Path
 
-# Taiga API Configuration
-TAIGA_API_BASE_URL = "https://api.taiga.io"
-PROJECT_SLUG = "azeb-admin-empathy"
-PROJECT_ID = 1554789
+# Configuration - Load from project config file or environment variables
+TAIGA_API_BASE_URL = os.getenv("TAIGA_API_BASE_URL", "https://api.taiga.io")
+PROJECT_SLUG = None  # Will be loaded from config
+PROJECT_ID = None    # Will be loaded from config
+
+
+def load_project_configuration():
+    """Load project configuration from config file or environment variables."""
+    global PROJECT_SLUG, PROJECT_ID
+    
+    # First try environment variables
+    env_slug = os.getenv("TAIGA_PROJECT_SLUG")
+    env_id = os.getenv("TAIGA_PROJECT_ID")
+    
+    if env_slug and env_id:
+        try:
+            PROJECT_SLUG = env_slug
+            PROJECT_ID = int(env_id)
+            print(f"✅ Using project from environment: {PROJECT_SLUG} (ID: {PROJECT_ID})")
+            return True
+        except ValueError:
+            print("⚠️  Invalid TAIGA_PROJECT_ID in environment (must be integer)")
+    
+    # Try to load from project config file
+    config_file = Path.cwd() / "project_config.json"
+    if config_file.exists():
+        try:
+            with open(config_file, 'r') as f:
+                config_data = json.load(f)
+            
+            PROJECT_SLUG = config_data.get("project_slug")
+            PROJECT_ID = config_data.get("project_id")
+            
+            if PROJECT_SLUG and PROJECT_ID:
+                print(f"✅ Loaded project configuration: {PROJECT_SLUG} (ID: {PROJECT_ID})")
+                return True
+        except Exception as e:
+            print(f"⚠️  Could not load project configuration: {e}")
+    
+    # Fallback to old defaults if nothing else works
+    PROJECT_SLUG = "your-project-slug"
+    PROJECT_ID = 0
+    print("⚠️  Using fallback project configuration")
+    return False
 
 
 def load_tokens_from_file(filename):
@@ -393,10 +434,26 @@ def print_cfd_summary(cfd_data, statuses):
 
 def main():
     """Main CFD generation function."""
+    # Load project configuration first
+    config_loaded = load_project_configuration()
+    if not config_loaded:
+        print("⚠️  Using fallback project configuration")
+    
     print("=" * 70)
     print("📈 TAIGA CFD GENERATOR")
     print("=" * 70)
     print(f"🎯 Target Project: {PROJECT_SLUG} (ID: {PROJECT_ID})")
+    
+    # Validate project configuration
+    if not PROJECT_SLUG or PROJECT_SLUG == "your-project-slug" or not PROJECT_ID or PROJECT_ID == 0:
+        print("\n❌ Invalid project configuration!")
+        print("💡 Please run the CLI interface first to configure your project:")
+        print("   python3 -m taiga_cfd.cli")
+        print("   or set environment variables:")
+        print("   export TAIGA_PROJECT_SLUG='your-actual-project-slug'")
+        print("   export TAIGA_PROJECT_ID='your-actual-project-id'")
+        sys.exit(1)
+    
     print()
 
     # Parse command line arguments for advanced options
@@ -472,17 +529,14 @@ def main():
     print()
 
     # Load token
-    token_files = [
-        f
-        for f in os.listdir(".")
-        if f.startswith("taiga_tokens_") and f.endswith(".json")
-    ]
+    data_dir = Path.cwd()
+    token_files = list(data_dir.glob("taiga_tokens_*.json"))
     if not token_files:
-        print("❌ No token file found. Please run taiga-cfd.py first.")
+        print("❌ No token file found. Please run taiga-cfd first to authenticate.")
         sys.exit(1)
 
-    token_file = max(token_files)
-    token_data = load_tokens_from_file(token_file)
+    token_file = max(token_files, key=lambda f: f.stat().st_mtime)
+    token_data = load_tokens_from_file(str(token_file))
 
     if not token_data:
         sys.exit(1)
@@ -533,9 +587,27 @@ def main():
     # Step 7: Generate visualizations
     try:
         print(f"\n🎨 Generating CFD visualizations...")
-        from cfd_visualizer import generate_all_visualizations
-
-        visualization_success = generate_all_visualizations(csv_filename)
+        
+        # Import visualizer module - handle both package and direct execution
+        try:
+            from . import cfd_visualizer
+        except ImportError:
+            # Fallback for when running as standalone script
+            import cfd_visualizer
+        
+        # Set up arguments for the visualizer
+        original_argv = sys.argv
+        sys.argv = ['cfd_visualizer', csv_filename]
+        
+        try:
+            cfd_visualizer.main()
+            visualization_success = True
+        except SystemExit as e:
+            visualization_success = e.code == 0
+        except Exception:
+            visualization_success = False
+        finally:
+            sys.argv = original_argv
 
         if visualization_success:
             print(f"✅ Visual CFD charts created in cfd_visualizations/ directory")

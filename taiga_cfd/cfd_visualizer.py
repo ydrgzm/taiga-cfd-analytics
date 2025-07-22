@@ -18,6 +18,9 @@ Usage:
 """
 
 import pandas as pd
+# Set matplotlib backend to non-GUI before importing pyplot
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import seaborn as sns
@@ -26,7 +29,38 @@ from datetime import datetime
 import os
 import sys
 import argparse
+import json
 from pathlib import Path
+
+# Project configuration
+PROJECT_SLUG = None  # Will be loaded from config
+
+
+def load_project_configuration():
+    """Load project configuration from config file or environment variables."""
+    global PROJECT_SLUG
+    
+    # First try environment variables
+    env_slug = os.getenv("TAIGA_PROJECT_SLUG")
+    if env_slug:
+        PROJECT_SLUG = env_slug
+        return True
+    
+    # Try to load from project config file
+    config_file = Path.cwd() / "project_config.json"
+    if config_file.exists():
+        try:
+            with open(config_file, 'r') as f:
+                config_data = json.load(f)
+            
+            PROJECT_SLUG = config_data.get("project_slug", "Project")
+            return True
+        except Exception:
+            pass
+    
+    # Fallback
+    PROJECT_SLUG = "Project"
+    return False
 
 # Set style and color palette
 plt.style.use("seaborn-v0_8-darkgrid")
@@ -65,17 +99,16 @@ def load_cfd_data(csv_file):
 
 def find_latest_csv():
     """Find the most recent CFD CSV file."""
-    cfd_files = [
-        f for f in os.listdir(".") if f.startswith("cfd_data_") and f.endswith(".csv")
-    ]
+    data_dir = Path.cwd()
+    cfd_files = list(data_dir.glob("cfd_data_*.csv"))
     if not cfd_files:
-        print("❌ No CFD CSV files found")
+        print("❌ No CFD CSV files found in current directory")
         return None
 
     # Sort by modification time
-    latest_file = max(cfd_files, key=os.path.getmtime)
-    print(f"📊 Using latest CFD file: {latest_file}")
-    return latest_file
+    latest_file = max(cfd_files, key=lambda f: f.stat().st_mtime)
+    print(f"📊 Using latest CFD file: {latest_file.name}")
+    return str(latest_file)
 
 
 def create_cfd_stacked_area(df, output_file=None):
@@ -358,8 +391,9 @@ def create_comprehensive_dashboard(df, output_file=None):
     plt.setp(ax4.xaxis.get_majorticklabels(), rotation=45, ha="right")
 
     # Add overall title and metadata
+    load_project_configuration()  # Ensure config is loaded
     fig.suptitle(
-        "📊 Taiga CFD Analytics Dashboard - azeb-admin-empathy",
+        f"📊 Taiga CFD Analytics Dashboard - {PROJECT_SLUG}",
         fontsize=18,
         fontweight="bold",
         y=0.98,
@@ -405,7 +439,7 @@ def generate_all_visualizations(csv_file, output_format="png"):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     # Create output directory
-    output_dir = Path("cfd_visualizations")
+    output_dir = Path.cwd() / "cfd_visualizations"
     output_dir.mkdir(exist_ok=True)
 
     try:
@@ -447,6 +481,9 @@ def generate_all_visualizations(csv_file, output_format="png"):
 
 def main():
     """Main visualization function."""
+    # Load project configuration
+    load_project_configuration()
+    
     parser = argparse.ArgumentParser(description="Generate CFD visualizations")
     parser.add_argument("csv_file", nargs="?", help="CSV file path")
     parser.add_argument("--latest", action="store_true", help="Use latest CSV file")

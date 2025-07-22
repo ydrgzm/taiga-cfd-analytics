@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
 """
-Taiga CFD Analytics - Enterprise Edition
-Modern Terminal User Interface for Cumulative Flow Diagram Analytics
+Taiga CFD Analytics - Enterprise Terminal Interface
 
-A comprehensive interactive tool with beautiful Terminal User Interface
-for managing Taiga CFD analytics with rich formatting and colors.
+A comprehensive tool for generating Cumulative Flow Diagrams (CFD) and analytics
+from Taiga project management data with professional visualizations.
 
-Created by: Muhammad Zeshan Ayub
-GitHub: https://github.com/ydrgzm
-Email: zeshanayub.connect@gmail.com
-Version: 2.2.1
+Features:
+- Interactive Terminal User Interface (TUI)
+- Professional CFD chart generation
+- Multiple visualization types (dashboard, trends, distribution)
+- CSV export for further analysis
+- Authentication management
 
-Usage:
-    taiga-cfd
-    taiga-cfd-analytics  
-    taiga-analytics
+Version: 2.3.2
+Author: Muhammad Zeshan Ayub
+Repository: https://github.com/ydrgzm/taiga-cfd-analytics
 """
 
-__version__ = "2.2.1"
+__version__ = "2.3.2"
 __author__ = "Muhammad Zeshan Ayub"
 __email__ = "zeshanayub.connect@gmail.com"
 __github__ = "https://github.com/ydrgzm"

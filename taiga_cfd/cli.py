@@ -9,7 +9,7 @@ for managing Taiga CFD analytics with rich formatting and colors.
 Created by: Muhammad Zeshan Ayub
 GitHub: https://github.com/ydrgzm
 Email: zeshanayub.connect@gmail.com
-Version: 2.2.1
+Version: 2.3.2
 
 Usage:
     python3 taiga_cfd_tui.py
@@ -39,12 +39,22 @@ from rich import box
 from rich.tree import Tree
 from rich.status import Status
 import time
+import threading
+
+# Import taiga_cfd modules
+from . import taiga_cfd_generator
+from . import cfd_visualizer
 
 # Configuration
-TAIGA_API_BASE_URL = "https://api.taiga.io"
-PROJECT_SLUG = "azeb-admin-empathy"
-PROJECT_ID = 1554789
-VENV_PYTHON = "/Users/zeshan.ayub/Documents/taiga-stats/.venv/bin/python"
+TAIGA_API_BASE_URL = os.getenv("TAIGA_API_BASE_URL", "https://api.taiga.io")
+# Project configuration - will be set during initialization
+PROJECT_SLUG = None  # Will be set during configuration check
+PROJECT_ID = None    # Will be set during configuration check
+VENV_PYTHON = sys.executable  # Use current Python executable
+
+# Data directories - use user's current working directory
+DATA_DIR = Path.cwd()
+VISUALIZATION_DIR = DATA_DIR / "cfd_visualizations"
 
 
 class ModernTaigaCFDManager:
@@ -64,6 +74,283 @@ class ModernTaigaCFDManager:
             "info": "#2196F3",
             "accent": "#E91E63",
         }
+        
+        # Check configuration on startup
+        self._check_configuration()
+        
+    def _check_configuration(self):
+        """Check if required configuration is available."""
+        global PROJECT_SLUG, PROJECT_ID
+        
+        # Ensure data directories exist
+        DATA_DIR.mkdir(exist_ok=True)
+        VISUALIZATION_DIR.mkdir(exist_ok=True)
+        
+        # Check for project configuration from environment variables first
+        env_slug = os.getenv("TAIGA_PROJECT_SLUG")
+        env_id = os.getenv("TAIGA_PROJECT_ID")
+        
+        if env_slug and env_id:
+            try:
+                PROJECT_SLUG = env_slug
+                PROJECT_ID = int(env_id)
+                self.console.print(f"[green]✅ Using project from environment: {PROJECT_SLUG} (ID: {PROJECT_ID})[/green]")
+                return
+            except ValueError:
+                self.console.print("[yellow]⚠️  Invalid TAIGA_PROJECT_ID in environment (must be integer)[/yellow]")
+        
+        # Try to load from saved configuration file
+        if self._load_project_configuration():
+            return
+        
+        # If not in environment or saved config, require user input
+        if not PROJECT_SLUG or not PROJECT_ID:
+            self._configure_project_settings()
+    
+    def _load_project_configuration(self):
+        """Load project configuration from saved file."""
+        global PROJECT_SLUG, PROJECT_ID
+        
+        config_file = DATA_DIR / "project_config.json"
+        if not config_file.exists():
+            return False
+            
+        try:
+            with open(config_file, 'r') as f:
+                config_data = json.load(f)
+                
+            PROJECT_SLUG = config_data.get("project_slug")
+            PROJECT_ID = config_data.get("project_id")
+            
+            if PROJECT_SLUG and PROJECT_ID:
+                self.console.print(f"[green]✅ Loaded project configuration: {PROJECT_SLUG} (ID: {PROJECT_ID})[/green]")
+                return True
+        except Exception as e:
+            self.console.print(f"[yellow]⚠️  Could not load saved configuration: {e}[/yellow]")
+            
+        return False
+    
+    def _configure_project_settings(self):
+        """Interactive project configuration with validation."""
+        global PROJECT_SLUG, PROJECT_ID
+        
+        self.console.print("\n[bold yellow]🎯 Project Configuration Required[/bold yellow]")
+        self.console.print("[dim]Just provide your project slug - we'll find the ID automatically![/dim]\n")
+        
+        # Get project slug
+        while True:
+            project_slug = Prompt.ask(
+                "[cyan]📋 Enter your Taiga project slug[/cyan]",
+                console=self.console
+            ).strip()
+            
+            if not project_slug:
+                self.console.print("[red]❌ Project slug cannot be empty[/red]")
+                continue
+                
+            if ' ' in project_slug:
+                self.console.print("[red]❌ Project slug cannot contain spaces[/red]")
+                continue
+                
+            if not project_slug.replace('-', '').replace('_', '').isalnum():
+                self.console.print("[red]❌ Project slug can only contain letters, numbers, hyphens, and underscores[/red]")
+                continue
+                
+            # Try to find project ID from slug
+            if self.auth_token:
+                project_id = self._find_project_id_from_slug(project_slug)
+                if project_id:
+                    PROJECT_SLUG = project_slug
+                    PROJECT_ID = project_id
+                    self._save_project_configuration()
+                    return
+                else:
+                    self.console.print(f"[red]❌ Could not find project with slug '{project_slug}' or you don't have access[/red]")
+                    if not Confirm.ask("Try another slug?", console=self.console, default=True):
+                        break
+            else:
+                # Save slug for now, will validate after authentication
+                PROJECT_SLUG = project_slug
+                self._save_project_configuration()
+                self.console.print("[yellow]⚠️  Project ID will be determined after authentication[/yellow]")
+                return
+    
+    def _find_project_id_from_slug(self, project_slug):
+        """Find project ID from project slug using Taiga API."""
+        if not self.auth_token:
+            return None
+            
+        headers = {"Authorization": f"Bearer {self.auth_token}"}
+        
+        try:
+            with self.console.status(
+                f"[cyan]🔍 Looking up project '{project_slug}'...", spinner="dots"
+            ):
+                # Search for projects by slug using the projects endpoint
+                response = requests.get(
+                    f"{TAIGA_API_BASE_URL}/api/v1/projects/by_slug?slug={project_slug}",
+                    headers=headers,
+                    timeout=15
+                )
+                
+                if response.status_code == 200:
+                    project_data = response.json()
+                    project_id = project_data.get('id')
+                    project_name = project_data.get('name', 'Unknown')
+                    
+                    if project_id:
+                        self.console.print(f"[green]✅ Found project: {project_name} (ID: {project_id})[/green]")
+                        return project_id
+                
+                elif response.status_code == 404:
+                    # Try alternative approach - list user's projects and search
+                    return self._search_user_projects_for_slug(project_slug, headers)
+                    
+                else:
+                    self.console.print(f"[yellow]⚠️  API lookup failed (HTTP {response.status_code})[/yellow]")
+                    return self._search_user_projects_for_slug(project_slug, headers)
+                    
+        except Exception as e:
+            self.console.print(f"[yellow]⚠️  Error looking up project: {e}[/yellow]")
+            return self._search_user_projects_for_slug(project_slug, headers)
+            
+        return None
+    
+    def _search_user_projects_for_slug(self, project_slug, headers):
+        """Search through user's projects to find matching slug."""
+        try:
+            # Get user's projects
+            response = requests.get(
+                f"{TAIGA_API_BASE_URL}/api/v1/projects",
+                headers=headers,
+                timeout=15
+            )
+            
+            if response.status_code == 200:
+                projects = response.json()
+                
+                # Search for matching slug
+                for project in projects:
+                    if project.get('slug') == project_slug:
+                        project_id = project.get('id')
+                        project_name = project.get('name', 'Unknown')
+                        self.console.print(f"[green]✅ Found project: {project_name} (ID: {project_id})[/green]")
+                        return project_id
+                
+                # Show available projects if no match found
+                self._show_available_projects(projects)
+                
+        except Exception as e:
+            self.console.print(f"[yellow]⚠️  Error searching projects: {e}[/yellow]")
+            
+        return None
+    
+    def _show_available_projects(self, projects):
+        """Show available projects to help user find the correct slug."""
+        if not projects:
+            self.console.print("[yellow]💡 No projects found or no access to any projects[/yellow]")
+            return
+            
+        self.console.print("\n[cyan]💡 Available projects you have access to:[/cyan]")
+        
+        # Create table of available projects
+        projects_table = Table(
+            show_header=True,
+            header_style="bold cyan",
+            border_style="blue",
+            box=box.MINIMAL,
+        )
+        
+        projects_table.add_column("Slug", style="bold white", width=25)
+        projects_table.add_column("Name", style="cyan", width=35)
+        projects_table.add_column("ID", style="green", width=10)
+        
+        # Sort projects by name and show up to 10
+        sorted_projects = sorted(projects, key=lambda p: p.get('name', ''))[:10]
+        
+        for project in sorted_projects:
+            projects_table.add_row(
+                project.get('slug', 'N/A'),
+                project.get('name', 'Unknown')[:30] + ('...' if len(project.get('name', '')) > 30 else ''),
+                str(project.get('id', 'N/A'))
+            )
+        
+        if len(projects) > 10:
+            projects_table.add_row("...", f"and {len(projects) - 10} more", "...")
+            
+        self.console.print(projects_table)
+        self.console.print()
+    
+    def _validate_project_configuration(self):
+        """Validate project configuration against Taiga API."""
+        global PROJECT_SLUG, PROJECT_ID
+        
+        if not self.auth_token:
+            return False
+        
+        # If we only have slug, try to find the ID
+        if PROJECT_SLUG and not PROJECT_ID:
+            project_id = self._find_project_id_from_slug(PROJECT_SLUG)
+            if project_id:
+                PROJECT_ID = project_id
+                self._save_project_configuration()
+                return True
+            else:
+                return False
+        
+        # If we have both, validate they match    
+        if not PROJECT_SLUG or not PROJECT_ID:
+            return False
+            
+        headers = {"Authorization": f"Bearer {self.auth_token}"}
+        
+        try:
+            # Validate project exists and user has access
+            response = requests.get(
+                f"{TAIGA_API_BASE_URL}/api/v1/projects/{PROJECT_ID}",
+                headers=headers,
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                project_data = response.json()
+                actual_slug = project_data.get('slug', '')
+                
+                if actual_slug != PROJECT_SLUG:
+                    self.console.print(f"[yellow]⚠️  Project slug mismatch: Expected '{PROJECT_SLUG}', found '{actual_slug}'[/yellow]")
+                    
+                    if Confirm.ask(f"Update slug to '{actual_slug}'?", console=self.console, default=True):
+                        PROJECT_SLUG = actual_slug
+                
+                self.console.print(f"[green]✅ Project validated: {project_data.get('name', 'Unknown')}[/green]")
+                return True
+            elif response.status_code == 404:
+                self.console.print(f"[red]❌ Project with ID {PROJECT_ID} not found or no access[/red]")
+                return False
+            else:
+                self.console.print(f"[yellow]⚠️  Could not validate project (HTTP {response.status_code})[/yellow]")
+                return False
+                
+        except Exception as e:
+            self.console.print(f"[yellow]⚠️  Project validation error: {e}[/yellow]")
+            return False
+    
+    def _save_project_configuration(self):
+        """Save project configuration to a local file."""
+        config_file = DATA_DIR / "project_config.json"
+        config_data = {
+            "project_slug": PROJECT_SLUG,
+            "project_id": PROJECT_ID,
+            "api_base_url": TAIGA_API_BASE_URL,
+            "configured_at": datetime.now().isoformat()
+        }
+        
+        try:
+            with open(config_file, 'w') as f:
+                json.dump(config_data, f, indent=2)
+            self.console.print(f"[green]✅ Project configuration saved[/green]")
+        except Exception as e:
+            self.console.print(f"[yellow]⚠️  Could not save configuration: {e}[/yellow]")
 
     def clear_screen(self):
         """Clear terminal screen."""
@@ -85,16 +372,11 @@ class ModernTaigaCFDManager:
 
     def show_status_bar(self):
         """Show current system status in a beautiful bar."""
-        # Count files
-        csv_files = [
-            f
-            for f in os.listdir(".")
-            if f.startswith("cfd_data_") and f.endswith(".csv")
-        ]
-        viz_dir = Path("cfd_visualizations")
+                # Count files
+        csv_files = [f for f in DATA_DIR.glob("cfd_data_*.csv")]
         viz_files = []
-        if viz_dir.exists():
-            viz_files = list(viz_dir.glob("*.png")) + list(viz_dir.glob("*.pdf"))
+        if VISUALIZATION_DIR.exists():
+            viz_files = list(VISUALIZATION_DIR.glob('*.png')) + list(VISUALIZATION_DIR.glob('*.pdf'))
 
         # Create status table
         status_table = Table(
@@ -119,9 +401,11 @@ class ModernTaigaCFDManager:
             "📊 CSV Files:",
             f"{len(csv_files)} files",
         )
+        
+        project_display = PROJECT_SLUG if PROJECT_SLUG else "Not configured"
         status_table.add_row(
             "🎯 Project:",
-            PROJECT_SLUG,
+            project_display,
             "🎨 Visualizations:",
             f"{len(viz_files)} charts",
         )
@@ -270,16 +554,12 @@ class ModernTaigaCFDManager:
             "[cyan]🔍 Checking for existing authentication...", spinner="dots"
         ):
             time.sleep(1)  # Visual delay for effect
-
-            token_files = [
-                f
-                for f in os.listdir(".")
-                if f.startswith("taiga_tokens_") and f.endswith(".json")
-            ]
+            
+            token_files = list(DATA_DIR.glob("taiga_tokens_*.json"))
             if not token_files:
                 return False
 
-            latest_token_file = max(token_files, key=os.path.getmtime)
+            latest_token_file = max(token_files, key=lambda f: f.stat().st_mtime)
 
             try:
                 with open(latest_token_file, "r") as f:
@@ -372,7 +652,7 @@ class ModernTaigaCFDManager:
 
                     # Save tokens
                     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    token_file = f"taiga_tokens_{timestamp}.json"
+                    token_file = DATA_DIR / f"taiga_tokens_{timestamp}.json"
 
                     token_data = {
                         "auth_token": self.auth_token,
@@ -389,6 +669,19 @@ class ModernTaigaCFDManager:
                         f"Welcome, {user_name}!",
                         f"🔑 Tokens saved to: {token_file}",
                     )
+                    
+                    # Validate/complete project configuration after authentication
+                    if PROJECT_SLUG and not PROJECT_ID:
+                        # We have slug but need to find ID
+                        self.console.print("\n[cyan]🔍 Completing project configuration...[/cyan]")
+                        self._validate_project_configuration()
+                    elif PROJECT_SLUG and PROJECT_ID:
+                        # We have both, just validate
+                        self._validate_project_configuration()
+                    else:
+                        # Need full configuration
+                        self._configure_project_settings()
+                    
                     return True
 
             self.show_error_panel(
@@ -683,15 +976,6 @@ class ModernTaigaCFDManager:
         self.console.print()
 
         try:
-            # Command construction
-            cmd = [
-                VENV_PYTHON,
-                "taiga_cfd/taiga_cfd_generator.py",
-                f"--granularity={granularity}",
-                f"--start-date={start_date.strftime('%Y-%m-%d')}",
-                f"--end-date={end_date.strftime('%Y-%m-%d')}",
-            ]
-
             # Beautiful progress display
             with self.console.status(
                 "[cyan]🚀 Launching CFD generator...", spinner="dots"
@@ -699,11 +983,35 @@ class ModernTaigaCFDManager:
                 time.sleep(1)
 
             self.console.print("[green]🔄 Running CFD generation engine...[/green]")
-            self.console.print(f"[dim]Command: {' '.join(cmd[1:])}[/dim]\n")
-
-            result = subprocess.run(cmd, cwd=os.getcwd())
-
-            if result.returncode == 0:
+            self.console.print(f"[dim]Parameters: {granularity}, {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}[/dim]\n")
+            
+            # Set up arguments for the generator
+            original_argv = sys.argv
+            sys.argv = [
+                'taiga_cfd_generator',
+                f"--granularity={granularity}",
+                f"--start-date={start_date.strftime('%Y-%m-%d')}",
+                f"--end-date={end_date.strftime('%Y-%m-%d')}"
+            ]
+            
+            try:
+                # Call the generator main function directly
+                taiga_cfd_generator.main()
+                success = True
+            except SystemExit as e:
+                success = e.code == 0
+            except Exception as e:
+                self.console.print(f"[red]Error during generation: {e}[/red]")
+                self.console.print(f"[dim]Error type: {type(e).__name__}[/dim]")
+                if hasattr(e, '__traceback__'):
+                    import traceback
+                    traceback.print_exc()
+                success = False
+            finally:
+                # Restore original argv
+                sys.argv = original_argv
+            
+            if success:
                 self.show_success_panel(
                     "Generation Complete",
                     "CFD data and visualizations created successfully!",
@@ -803,28 +1111,27 @@ class ModernTaigaCFDManager:
             task = progress.add_task("Creating professional charts...", total=100)
 
             try:
-                cmd = [VENV_PYTHON, "taiga_cfd/cfd_visualizer.py", "--latest"]
-
-                # Simulate progress during subprocess
-                import threading
-
-                result_container = []
-
+                # Set up arguments for the visualizer
+                original_argv = sys.argv
+                sys.argv = ['cfd_visualizer', '--latest']
+                
                 def run_command():
-                    result = subprocess.run(cmd, capture_output=True, text=True)
-                    result_container.append(result)
+                    try:
+                        cfd_visualizer.main()
+                        return True
+                    except SystemExit as e:
+                        return e.code == 0
+                    except Exception:
+                        return False
+                    finally:
+                        sys.argv = original_argv
 
-                thread = threading.Thread(target=run_command)
-                thread.start()
-
-                while thread.is_alive():
-                    progress.update(task, advance=2)
-                    time.sleep(0.1)
-
-                thread.join()
+                # Run directly without threading to avoid matplotlib GUI issues
+                progress.update(task, advance=50)
+                result = run_command()
                 progress.update(task, completed=100)
 
-                if result_container[0].returncode == 0:
+                if result:
                     self.show_success_panel(
                         "Charts Created",
                         "Beautiful visualizations generated successfully!",
@@ -847,11 +1154,7 @@ class ModernTaigaCFDManager:
         )
 
         # Find CSV files
-        csv_files = [
-            f
-            for f in os.listdir(".")
-            if f.startswith("cfd_data_") and f.endswith(".csv")
-        ]
+        csv_files = list(DATA_DIR.glob("cfd_data_*.csv"))
 
         if not csv_files:
             self.show_error_panel(
@@ -875,14 +1178,14 @@ class ModernTaigaCFDManager:
         csv_table.add_column("Size", style="cyan", width=10)
         csv_table.add_column("Modified", style="dim white")
 
-        for i, file in enumerate(
-            sorted(csv_files, key=lambda f: os.path.getmtime(f), reverse=True), 1
+        for i, file_path in enumerate(
+            sorted(csv_files, key=lambda f: f.stat().st_mtime, reverse=True), 1
         ):
-            size_kb = os.path.getsize(file) // 1024
-            modified = datetime.fromtimestamp(os.path.getmtime(file)).strftime(
+            size_kb = file_path.stat().st_size // 1024
+            modified = datetime.fromtimestamp(file_path.stat().st_mtime).strftime(
                 "%m/%d %H:%M"
             )
-            csv_table.add_row(str(i), file, f"{size_kb}KB", modified)
+            csv_table.add_row(str(i), file_path.name, f"{size_kb}KB", modified)
 
         csv_panel = Panel(
             csv_table,
@@ -898,12 +1201,12 @@ class ModernTaigaCFDManager:
             "1",
         )
 
-        selected_file = sorted(
-            csv_files, key=lambda f: os.path.getmtime(f), reverse=True
+        selected_file_path = sorted(
+            csv_files, key=lambda f: f.stat().st_mtime, reverse=True
         )[int(choice_num) - 1]
 
         self.console.print(
-            f"\n[green]🎨 Generating charts from: {selected_file}[/green]"
+            f"\n[green]🎨 Generating charts from: {selected_file_path.name}[/green]"
         )
 
         with Progress(
@@ -914,30 +1217,30 @@ class ModernTaigaCFDManager:
             task = progress.add_task("Creating custom visualizations...", total=100)
 
             try:
-                cmd = [VENV_PYTHON, "taiga_cfd/cfd_visualizer.py", selected_file]
-
-                import threading
-
-                result_container = []
-
+                # Set up arguments for the visualizer
+                original_argv = sys.argv
+                sys.argv = ['cfd_visualizer', str(selected_file_path)]
+                
                 def run_command():
-                    result = subprocess.run(cmd, capture_output=True, text=True)
-                    result_container.append(result)
-
-                thread = threading.Thread(target=run_command)
-                thread.start()
-
-                while thread.is_alive():
-                    progress.update(task, advance=2)
-                    time.sleep(0.1)
-
-                thread.join()
+                    try:
+                        cfd_visualizer.main()
+                        return True
+                    except SystemExit as e:
+                        return e.code == 0
+                    except Exception:
+                        return False
+                    finally:
+                        sys.argv = original_argv
+                
+                # Run directly without threading to avoid matplotlib GUI issues
+                progress.update(task, advance=50)
+                result = run_command()
                 progress.update(task, completed=100)
 
-                if result_container[0].returncode == 0:
+                if result:
                     self.show_success_panel(
                         "Custom Charts Created",
-                        f"Visualizations generated from {selected_file}",
+                        f"Visualizations generated from {selected_file_path.name}",
                         "📊 All chart types created and saved",
                     )
                 else:
@@ -956,7 +1259,7 @@ class ModernTaigaCFDManager:
             "\n[cyan]📤 Export Studio - Convert charts to different formats[/cyan]"
         )
 
-        viz_dir = Path("cfd_visualizations")
+        viz_dir = VISUALIZATION_DIR
         if not viz_dir.exists():
             self.show_error_panel(
                 "No Export Data",
@@ -1027,7 +1330,7 @@ class ModernTaigaCFDManager:
 
     def view_visualization_gallery(self):
         """Beautiful visualization gallery interface."""
-        viz_dir = Path("cfd_visualizations")
+        viz_dir = VISUALIZATION_DIR
 
         if not viz_dir.exists():
             self.show_error_panel(
@@ -1148,12 +1451,8 @@ class ModernTaigaCFDManager:
 
         # System status
         venv_path = Path(VENV_PYTHON)
-        csv_files = [
-            f
-            for f in os.listdir(".")
-            if f.startswith("cfd_data_") and f.endswith(".csv")
-        ]
-        viz_dir = Path("cfd_visualizations")
+        csv_files = list(DATA_DIR.glob("cfd_data_*.csv"))
+        viz_dir = VISUALIZATION_DIR
         viz_files = []
         if viz_dir.exists():
             viz_files = list(viz_dir.glob("*.png")) + list(viz_dir.glob("*.pdf"))
@@ -1172,12 +1471,14 @@ class ModernTaigaCFDManager:
         system_table.add_row(
             "🎨 Visualization Files:", f"🖼️ {len(viz_files)} charts created"
         )
-        system_table.add_row("🎯 Target Project:", f"{PROJECT_SLUG} (ID: {PROJECT_ID})")
+        
+        project_info = f"{PROJECT_SLUG} (ID: {PROJECT_ID})" if PROJECT_SLUG and PROJECT_ID else "Not configured"
+        system_table.add_row("🎯 Target Project:", project_info)
         system_table.add_row("🌐 API Endpoint:", TAIGA_API_BASE_URL)
 
         if csv_files:
-            latest_csv = max(csv_files, key=os.path.getmtime)
-            system_table.add_row("📊 Latest Data:", latest_csv)
+            latest_csv = max(csv_files, key=lambda f: f.stat().st_mtime)
+            system_table.add_row("📊 Latest Data:", latest_csv.name)
 
         system_panel = Panel(
             system_table,
@@ -1209,8 +1510,11 @@ class ModernTaigaCFDManager:
         help_tree = Tree("🎯 [bold]Taiga CFD System Guide[/bold]")
 
         # Authentication branch
-        auth_branch = help_tree.add("🔐 [bold cyan]Authentication[/bold cyan]")
+        auth_branch = help_tree.add("🔐 [bold cyan]Authentication & Setup[/bold cyan]")
         auth_branch.add("• One-time setup with Taiga credentials")
+        auth_branch.add("• Simple project configuration (just enter project slug)")
+        auth_branch.add("• Automatic project ID detection via API")
+        auth_branch.add("• Project validation and access verification")
         auth_branch.add("• Secure token storage and auto-detection")
         auth_branch.add("• Re-authentication when tokens expire")
 
@@ -1236,13 +1540,21 @@ class ModernTaigaCFDManager:
         tips_branch.add("• Generate monthly reports with custom ranges")
         tips_branch.add("• Export as PDF for presentations")
         tips_branch.add("• Keep CSV files for historical analysis")
+        
+        # Configuration branch
+        config_branch = help_tree.add("⚙️ [bold blue]Configuration Options[/bold blue]")
+        config_branch.add("• TAIGA_API_BASE_URL: Custom API endpoint")
+        config_branch.add("• TAIGA_PROJECT_SLUG: Your project identifier (main)")
+        config_branch.add("• TAIGA_PROJECT_ID: Auto-detected from slug (optional)")
+        config_branch.add("• Configuration saved locally for reuse")
+        config_branch.add("• Project lookup shows available projects if needed")
 
         # Credits branch
         credits_branch = help_tree.add("👨‍💻 [bold yellow]Credits[/bold yellow]")
         credits_branch.add("• Created by: Muhammad Zeshan Ayub")
         credits_branch.add("• GitHub: https://github.com/ydrgzm")
         credits_branch.add("• Email: zeshanayub.connect@gmail.com")
-        credits_branch.add("• Version: 2.2.1 (Enterprise Edition)")
+        credits_branch.add("• Version: 2.3.2 (Enterprise Edition)")
 
         help_panel = Panel(
             help_tree,
@@ -1309,6 +1621,18 @@ class ModernTaigaCFDManager:
                         "\n[dim]Press Enter to continue...", console=self.console
                     )
                     continue
+                
+                if not PROJECT_SLUG or not PROJECT_ID:
+                    self.show_error_panel(
+                        "Project Configuration Required",
+                        "Please configure your Taiga project before generating CFD data",
+                        "Project settings will be requested after authentication",
+                    )
+                    self._configure_project_settings()
+                    Prompt.ask(
+                        "\n[dim]Press Enter to continue...", console=self.console
+                    )
+                    continue
 
                 start_date, end_date, period_name = self.get_date_range_selection()
                 granularity = self.get_granularity_selection()
@@ -1329,6 +1653,18 @@ class ModernTaigaCFDManager:
                         "Please authenticate first before running analysis",
                         "Select option 1 to set up authentication",
                     )
+                    Prompt.ask(
+                        "\n[dim]Press Enter to continue...", console=self.console
+                    )
+                    continue
+                
+                if not PROJECT_SLUG or not PROJECT_ID:
+                    self.show_error_panel(
+                        "Project Configuration Required",
+                        "Please configure your Taiga project before running analysis",
+                        "Project settings will be requested after authentication",
+                    )
+                    self._configure_project_settings()
                     Prompt.ask(
                         "\n[dim]Press Enter to continue...", console=self.console
                     )

@@ -19,13 +19,15 @@ long_description = (this_directory / "README.md").read_text()
 # Version - synchronized with taiga_cfd module
 # Read version from the module's __init__.py file
 def get_version():
-    version_file = this_directory / "taiga_cfd" / "__init__.py"
-    if version_file.exists():
-        with open(version_file, "r") as f:
+    """Get version from package __init__.py"""
+    try:
+        with open("taiga_cfd/__init__.py", "r") as f:
             for line in f:
                 if line.startswith("__version__"):
-                    return line.split("=")[1].strip().strip('"').strip("'")
-    return "2.2.1"  # Fallback
+                    return line.split("=")[1].strip().strip('"')
+    except Exception:
+        pass
+    return "2.3.2"  # Fallback
 
 
 __version__ = get_version()
@@ -96,6 +98,8 @@ setup(
             "taiga-cfd=taiga_cfd.cli:main",
             "taiga-cfd-analytics=taiga_cfd.cli:main",
             "taiga-analytics=taiga_cfd.cli:main",
+            "taiga-cfd-generator=taiga_cfd.taiga_cfd_generator:main",
+            "taiga-cfd-visualizer=taiga_cfd.cfd_visualizer:main",
         ],
     },
     include_package_data=True,
